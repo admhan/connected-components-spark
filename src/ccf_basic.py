@@ -1,58 +1,74 @@
-from pyspark import SparkContext
+"""Implémentation de base de l'algorithme CCF avec des RDD Spark."""
+
+from __future__ import annotations
+
 import time
+from pyspark import SparkContext
+from pyspark.rdd import RDD
 
 
-def load_edges(sc, path):
-    """
-    Load an edge list from a text file.
-    Format: u v
-    """
-    return sc.textFile(path) \
-             .map(lambda line: line.split()) \
-             .map(lambda x: (x[0], x[1]))
+EdgeRDD = RDD[tuple[str, str]]
 
 
-def initialize_pairs(edges):
+def load_edges(sc: SparkContext, path: str) -> EdgeRDD:
+    """Charge une liste d'arêtes orientées depuis un fichier texte.
+
+    Chaque ligne doit suivre le format ``u v`` où ``u`` et ``v`` sont
+    les identifiants de deux sommets.
     """
-    Symmetrize the graph.
-    """
-    return edges.flatMap(lambda e: [(e[0], e[1]), (e[1], e[0])])
+    return (
+        sc.textFile(path)
+        .map(lambda line: line.split())
+        .map(lambda tokens: (tokens[0], tokens[1]))
+    )
 
 
-def ccf_iteration(pairs):
+def initialize_pairs(edges: EdgeRDD) -> EdgeRDD:
+    """Symétrise le graphe en ajoutant l'arête inverse pour chaque arête.
+
+    La sortie contient les couples ``(u, v)`` et ``(v, u)`` afin de traiter
+    le graphe comme non orienté.
     """
-    One iteration of the Connected Component Finder algorithm.
-    """
+    return edges.flatMap(lambda edge: [(edge[0], edge[1]), (edge[1], edge[0])])
+
+
+def ccf_iteration(pairs: EdgeRDD) -> EdgeRDD:
+    """Exécute une itération de propagation du minimum local (CCF)."""
     neighbors = pairs.groupByKey()
 
-    def propagate(node_neighbors):
-        node, neighs = node_neighbors
-        neighs = list(neighs)
+    def propagate(node_neighbors: tuple[str, list[str]]) -> list[tuple[str, str]]:
+        """Propage l'identifiant minimal observé dans un voisinage."""
+        node, neighs_iter = node_neighbors
+        neighs = list(neighs_iter)
         min_id = min([node] + neighs)
 
-        emitted = []
+        emitted: list[tuple[str, str]] = []
+        # Si un voisin possède un identifiant plus petit, on relie le sommet
+        # courant et ses voisins à cette étiquette minimale.
         if min_id < node:
             emitted.append((node, min_id))
-            for n in neighs:
-                if n != min_id:
-                    emitted.append((n, min_id))
+            for neighbor in neighs:
+                if neighbor != min_id:
+                    emitted.append((neighbor, min_id))
         return emitted
 
     return neighbors.flatMap(propagate)
 
 
-def compute_ccf(sc, edge_path, max_iter=50):
+def compute_ccf(sc: SparkContext, edge_path: str, max_iter: int = 50) -> EdgeRDD:
+    """Calcule les composantes connexes avec la version basique du CCF."""
     edges = load_edges(sc, edge_path)
     pairs = initialize_pairs(edges).distinct()
 
     iteration = 0
     changed = True
-    start = time.time()
+    start_time = time.time()
 
     while changed and iteration < max_iter:
         iteration += 1
 
         new_pairs = ccf_iteration(pairs).distinct()
+        # Le calcul converge quand aucune nouvelle paire n'est produite.
         diff = new_pairs.subtract(pairs)
         changed = not diff.isEmpty()
 
@@ -60,13 +76,13 @@ def compute_ccf(sc, edge_path, max_iter=50):
         print(f"Iteration {iteration} finished")
 
     print(f"Converged in {iteration} iterations")
-    print(f"Execution time: {time.time() - start:.2f}s")
+    print(f"Execution time: {time.time() - start_time:.2f}s")
 
     return pairs
 
 
 if __name__ == "__main__":
-    sc = SparkContext(appName="CCF_Basic")
-    result = compute_ccf(sc, "data/small_graph.txt")
+    spark_context = SparkContext(appName="CCF_Basic")
+    result = compute_ccf(spark_context, "data/small_graph.txt")
     result.collect()
-    sc.stop()
+    spark_context.stop()
