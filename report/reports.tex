@@ -1,0 +1,232 @@
+\documentclass[11pt,a4paper]{article}
+
+% -------------------------
+% Packages
+% -------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{caption}
+
+\geometry{margin=2.5cm}
+
+% -------------------------
+% Title
+% -------------------------
+\title{Finding Connected Components in Large Graphs using Spark}
+\author{First name Last name \\ Master 2 Big Data}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+The problem of finding connected components in graphs is fundamental in many application domains such as social network analysis, data mining and record linkage. When graphs become very large, traditional sequential algorithms are no longer suitable, and distributed approaches must be considered.
+
+In this project, we study and implement a scalable algorithm for connected component computation based on the \textit{Connected Component Finder (CCF)} approach, originally proposed in a MapReduce setting. The algorithm is implemented using Apache Spark and evaluated on graphs of increasing size.
+
+% =========================================================
+\section{Description of the adopted solution}
+% =========================================================
+
+La solution adoptée pour résoudre le problème de la détection des composantes connexes dans un graphe repose sur l’algorithme \textit{Connected Component Finder (CCF)}, tel que décrit par Kardes et al. Cet algorithme a été initialement conçu pour le modèle MapReduce et vise à traiter efficacement des graphes de très grande taille dans un environnement distribué.
+
+Le problème consiste, à partir d’un graphe non orienté représenté sous forme de liste d’arêtes, à identifier l’ensemble des composantes connexes, c’est-à-dire les sous-graphes maximaux dans lesquels tout couple de sommets est relié par un chemin. La solution retenue repose sur une représentation simple et déterministe des composantes connexes : chaque composante est identifiée par le plus petit identifiant de nœud qu’elle contient.
+
+L’algorithme fonctionne de manière itérative. À partir de la liste d’arêtes initiale, il maintient une correspondance entre chaque nœud du graphe et un identifiant de composante. À chaque itération, chaque nœud compare son identifiant courant avec ceux de ses voisins directs et adopte, le cas échéant, un identifiant plus petit. Ce mécanisme de propagation locale permet de diffuser progressivement l’identifiant minimal à l’ensemble des nœuds appartenant à une même composante connexe.
+
+La solution est structurée autour de deux traitements principaux exécutés de manière répétée. Le premier traitement, appelé \textit{CCF-Iterate}, est chargé de propager les identifiants de composantes à partir des relations de voisinage entre les nœuds. Le second traitement, \textit{CCF-Dedup}, permet d’éliminer les associations redondantes générées lors de la phase de propagation, afin de limiter le volume de données échangées entre les itérations et d’améliorer l’efficacité globale du calcul.
+
+Le processus itératif se poursuit jusqu’à ce qu’aucune nouvelle association nœud–composante ne soit produite lors d’une itération complète. Cette condition d’arrêt garantit que tous les nœuds ont atteint l’identifiant minimal de leur composante connexe et que le calcul des composantes est terminé.
+
+Dans le cadre de ce projet, l’algorithme CCF est implémenté en utilisant Apache Spark et l’API RDD. Deux implémentations sont réalisées : une implémentation de base, fidèle à l’algorithme MapReduce original, et une implémentation optimisée visant à améliorer l’efficacité mémoire et à réduire les coûts de communication. Ces deux versions sont ensuite comparées expérimentalement sur des graphes de tailles croissantes afin d’étudier leur comportement et leur passage à l’échelle.
+
+% =========================================================
+% =========================================================
+\section{Designed algorithms and global description}
+% =========================================================
+
+\subsection{Basic Connected Component Finder algorithm}
+
+The first algorithm implemented in this project corresponds to the basic version of the Connected Component Finder (CCF) described in the reference paper. The input graph is represented as an undirected edge list. Each connected component is identified by the smallest node identifier belonging to that component.
+
+The algorithm follows an iterative propagation strategy. At each iteration, each node examines the identifiers associated with its direct neighbors and updates its own component identifier if a smaller one is found. This process is repeated until convergence, i.e. when no new node--component associations are generated.
+
+The algorithm can be summarized as follows:
+\begin{itemize}
+    \item The graph is symmetrized so that each edge $(u, v)$ is represented as both $(u, v)$ and $(v, u)$.
+    \item For each node, the minimum identifier among the node itself and its neighbors is computed.
+    \item This minimum identifier is propagated to the node and its neighbors.
+    \item Duplicate pairs are removed to limit redundant information.
+    \item The process is repeated until no changes occur.
+\end{itemize}
+
+This approach ensures correctness while remaining simple and well suited to a distributed execution model based on Spark RDDs.
+
+\subsection{Optimized CCF algorithm}
+
+A second, optimized version of the algorithm is also implemented in order to improve scalability and execution efficiency. While the core logic remains identical to the basic version, several optimizations are introduced.
+
+First, intermediate RDDs are cached to avoid recomputation across iterations. This is particularly important since the same datasets are reused multiple times during the iterative process. Second, unnecessary shuffles are reduced by limiting the number of transformations applied at each iteration and by carefully managing deduplication operations.
+
+These optimizations are especially beneficial when processing larger graphs, where memory usage and communication costs become significant. The optimized version therefore provides a more efficient implementation while preserving the correctness and convergence properties of the original algorithm.
+
+% =========================================================
+\subsection{Comments on main code fragments}
+% =========================================================
+
+This subsection explains the main components of the PySpark implementation and their relation to the algorithmic design.
+
+\paragraph{Graph symmetrization}
+The initial edge list is transformed so that each undirected edge is represented in both directions. This step ensures that neighborhood information is correctly propagated during the iterations.
+
+\paragraph{Propagation of component identifiers}
+The core of the algorithm is implemented using a grouping operation that collects all neighbors of a given node. For each group, the minimum identifier is computed and propagated to the node and its neighbors. This operation directly implements the CCF-Iterate step described in the original algorithm.
+
+\paragraph{Deduplication}
+After each iteration, duplicate node--component pairs are removed using a distinct operation. This step corresponds to the CCF-Dedup phase and is essential to limit data growth and communication overhead in subsequent iterations.
+
+\paragraph{Iteration and convergence}
+The algorithm is executed iteratively. After each iteration, the newly generated pairs are compared with those from the previous iteration. If no differences are detected, the algorithm is considered to have converged and the computation stops.
+
+\paragraph{Optimizations}
+In the optimized version, caching is applied to frequently reused RDDs in order to reduce recomputation costs. This choice improves performance, particularly for graphs of increasing size, and highlights the impact of memory management in iterative Spark applications.
+
+% =========================================================
+
+\subsection{Basic CCF algorithm}
+
+% Description générale
+% Pseudo-code
+% Traduction MapReduce -> Spark RDD
+
+\subsection{Optimized CCF algorithm}
+
+% Différences avec la version de base
+% Optimisations mémoire et shuffle
+% Discussion globale
+
+% =========================================================
+% =========================================================
+\section{Analyse expérimentale et scalabilité}
+% =========================================================
+
+\subsection{Protocole expérimental}
+
+Les expériences ont été réalisées en mode \textit{local} sur une seule machine, avec Apache Spark (RDD) et une implémentation PySpark. Trois graphes synthétiques de tailles croissantes (\texttt{small}, \texttt{medium}, \texttt{large}) ont été utilisés afin d’observer l’évolution du temps d’exécution en fonction de la taille des données.
+
+Pour chaque graphe, nous avons exécuté :
+\begin{itemize}
+    \item l’algorithme CCF \textbf{de base} (\texttt{ccf\_basic.py}) ;
+    \item l’algorithme CCF \textbf{optimisé} (\texttt{ccf\_optimized.py}), intégrant notamment la mise en cache des RDD.
+\end{itemize}
+
+Le temps mesuré correspond au temps total d’exécution de l’algorithme jusqu’à convergence (arrêt lorsque l’itération ne produit plus de nouvelles paires).
+
+\subsection{Résultats obtenus}
+
+Les temps d’exécution (en secondes) observés sont présentés dans le Tableau~\ref{tab:scalability_results}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Graphe} & \textbf{CCF basique (s)} & \textbf{CCF optimisé (s)} \\
+\hline
+small  & 2.99 & 2.27 \\
+medium & 1.70 & 2.21 \\
+large  & 2.22 & 3.01 \\
+\hline
+\end{tabular}
+\caption{Comparaison des temps d'exécution entre l’implémentation basique et l’implémentation optimisée}
+\label{tab:scalability_results}
+\end{table}
+
+\subsection{Discussion : scalabilité et interprétation}
+
+Sur le graphe \texttt{small}, la version optimisée est plus rapide que la version basique. Ce comportement est cohérent avec l’objectif de l’optimisation : la mise en cache limite les recalculs lors des itérations successives, ce qui peut réduire le coût global lorsque les données tiennent facilement en mémoire.
+
+En revanche, sur \texttt{medium} et \texttt{large}, la version optimisée devient plus lente. Cette observation ne remet pas en cause la validité de l’algorithme : elle s’explique par le contexte d’exécution \textit{local} et par le fait que, pour des volumes encore modérés, le coût dominant peut être l’overhead de Spark (planification des tâches, sérialisation Python/JVM, gestion mémoire, shuffles induits par \texttt{distinct} et \texttt{subtract}, etc.). Dans ce cas, l’ajout d’optimisations (caching, persistance) peut introduire un surcoût qui dépasse les bénéfices attendus.
+
+Ainsi, ces résultats montrent que la performance et la scalabilité d’une optimisation dépendent fortement du contexte (taille des données, mode local vs cluster, coût relatif des shuffles et de la persistance). Sur un environnement distribué et pour des graphes significativement plus grands, on s’attend généralement à ce que les optimisations (notamment la réduction des recomputations par caching) deviennent plus avantageuses. Ici, l’expérience met surtout en évidence un point important en Big Data : les optimisations ne sont pas universelles et doivent être évaluées dans le contexte cible.
+
+% ======================================================% =========================================================
+\section{Analyse critique : points forts et limites des algorithmes}
+% =========================================================
+
+L’analyse expérimentale met en évidence plusieurs points forts et limites des deux implémentations du Connected Component Finder, en particulier dans le contexte d’une exécution locale avec Apache Spark.
+
+\subsection{Points forts}
+
+Un premier point fort commun aux deux algorithmes est leur \textbf{correction et stabilité}. Les versions basique et optimisée convergent systématiquement vers une solution correcte en un nombre limité d’itérations, ce qui valide la pertinence de l’implémentation par propagation itérative des identifiants de composantes.
+
+La version basique présente l’avantage d’une \textbf{simplicité d’exécution}. Son comportement est prévisible et son overhead est limité, ce qui la rend efficace sur des graphes de taille modérée et dans un environnement local. Elle constitue également une bonne référence pour comprendre le fonctionnement du CCF et pour servir de base de comparaison.
+
+La version optimisée montre quant à elle son intérêt sur les graphes de petite taille, où la mise en cache des RDD permet de réduire les recomputations et d’améliorer le temps d’exécution. Elle illustre l’importance des techniques d’optimisation offertes par Spark, telles que la persistance des données intermédiaires.
+
+\subsection{Limites}
+
+Les expériences soulignent toutefois plusieurs limites. Tout d’abord, la version optimisée introduit un \textbf{surcoût non négligeable} lié à la gestion de la mémoire et aux opérations de shuffle induites par certaines transformations (\texttt{distinct}, \texttt{subtract}). Dans un contexte local et pour des volumes de données encore modestes, ce surcoût peut dépasser les gains attendus, conduisant à des temps d’exécution plus élevés que ceux de la version basique.
+
+De manière plus générale, les résultats montrent que la \textbf{scalabilité effective} des optimisations dépend fortement du contexte d’exécution. Les bénéfices de la version optimisée ne sont pas pleinement visibles sur une seule machine, mais sont davantage attendus sur un cluster distribué, où la réduction des recomputations et une meilleure exploitation de la mémoire deviennent cruciales.
+
+Enfin, l’utilisation de Spark pour des graphes de taille relativement réduite met en évidence un \textbf{overhead structurel} important (initialisation des jobs, communication Python/JVM, planification des tâches), qui limite la pertinence des comparaisons de performance sur de petits jeux de données.
+
+\subsection{Synthèse}
+
+En synthèse, la version basique apparaît plus adaptée aux contextes simples et aux volumes modérés, tandis que la version optimisée est conceptuellement mieux préparée pour passer à l’échelle sur des environnements distribués et des graphes de grande taille. Cette étude illustre ainsi un principe fondamental des systèmes Big Data : une optimisation doit toujours être évaluée au regard du contexte cible et ne garantit pas systématiquement un gain de performance.
+=========================================================
+\section{Conclusion}
+% =========================================================
+
+% Résumé du travail
+% Enseignements principaux
+
+% =========================================================
+\appendix
+% =========================================================
+\appendix
+\section{Appendix : Code source}
+% =========================================================
+
+L’intégralité du code source développé dans le cadre de ce projet est disponible dans un dépôt GitHub public.
+
+Ce dépôt contient :
+\begin{itemize}
+    \item les implémentations Python des algorithmes CCF (versions basique et optimisée) ;
+    \item les scripts permettant de générer les graphes de test ;
+    \item le script d’expérimentation utilisé pour l’analyse des performances ;
+    \item les instructions nécessaires à la reproduction des expériences (README).
+\end{itemize}
+
+Le choix de référencer le code via un dépôt externe permet de garantir une meilleure lisibilité du rapport tout en assurant la reproductibilité complète des résultats.
+
+Le dépôt GitHub est accessible à l’adresse suivante :
+
+\begin{center}
+\texttt{https://github.com/admhan/connected-components-spark}
+\end{center}
+
+
+
+% Référence au dépôt GitHub ou insertion du code
+
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+
+\bibitem{ccf}
+H. Kardes, S. Agrawal, X. Wang, and A. Sun,
+\textit{Fast and Scalable Connected Component Computation in MapReduce},
+2013.
+
+\end{thebibliography}
+
+\end{document}
