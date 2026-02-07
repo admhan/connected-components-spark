@@ -1,0 +1,81 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\geometry{margin=2.5cm}
+
+\title{Projet Big Data -- Connected Component Finder avec Apache Spark}
+\author{Master 2 Big Data}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Introduction et formulation du problème}
+La détection de composantes connexes est une opération centrale en analyse de graphes (réseaux sociaux, déduplication, systèmes de recommandation, etc.). Lorsque le volume de données augmente, les approches séquentielles deviennent insuffisantes, ce qui motive l'usage de moteurs distribués comme Apache Spark.
+
+Ce projet vise à implémenter et évaluer l'algorithme \textit{Connected Component Finder} (CCF) en s'appuyant sur le modèle RDD de Spark. Le contexte expérimental est volontairement contrôlé : Spark 4.x, Python 3.11, exécution en mode local.
+
+\section{Description de la solution adoptée}
+La solution repose sur deux implémentations Python/PySpark d'un même schéma CCF :
+\begin{itemize}
+    \item une version \textbf{basique}, privilégiant la lisibilité et la référence algorithmique ;
+    \item une version \textbf{optimisée}, introduisant une stratégie de cache afin de réduire les recomputations de RDD entre itérations.
+\end{itemize}
+
+Les deux versions lisent un graphe sous forme de liste d'arêtes, symétrisent la relation de voisinage, puis appliquent une propagation itérative de l'identifiant minimal observé dans chaque voisinage.
+
+\section{Algorithmes conçus et commentaires sur les principaux fragments}
+Le cycle de calcul suit les étapes suivantes :
+\begin{enumerate}
+    \item Chargement des arêtes depuis un fichier texte.
+    \item Transformation en graphe non orienté (ajout des arêtes inverses).
+    \item Groupement par sommet pour obtenir les voisinages.
+    \item Propagation de l'étiquette minimale locale.
+    \item Déduplication des paires produites.
+    \item Test de convergence via la différence entre l'état courant et le nouvel état.
+\end{enumerate}
+
+Le coeur du CCF est la propagation : si un sommet observe un identifiant plus petit que le sien dans son voisinage, il se rattache à cet identifiant et diffuse cette information à ses voisins. La convergence est atteinte lorsqu'aucune nouvelle paire n'est générée.
+
+La version optimisée conserve cette logique mais applique \texttt{cache()} sur des RDD intermédiaires clés et \texttt{unpersist()} pour éviter l'accumulation mémoire d'états obsolètes.
+
+\section{Analyse expérimentale (scalabilité)}
+L'évaluation compare les versions basique et optimisée sur trois graphes de tailles croissantes (petit, moyen, grand). Les exécutions sont lancées en mode local Spark et les temps sont enregistrés dans \texttt{experiments/results.csv}.
+
+Cette méthodologie permet d'observer la tendance de montée en charge et l'impact des optimisations de persistance. Il est important de noter qu'en mode local, les coûts fixes Spark (initialisation, sérialisation Python/JVM, shuffles) peuvent masquer une partie des gains attendus sur de plus grands volumes.
+
+\section{Discussion critique : forces et faiblesses}
+\subsection*{Forces}
+\begin{itemize}
+    \item Implémentation fidèle du schéma CCF et convergence contrôlée.
+    \item Comparaison méthodique de deux variantes sur un protocole reproductible.
+    \item Structuration claire : génération des données, exécution, export des mesures.
+\end{itemize}
+
+\subsection*{Faiblesses}
+\begin{itemize}
+    \item Contexte local limitant la représentativité d'un scénario Big Data distribué.
+    \item Taille des jeux de données encore modérée pour maximiser les effets du cache.
+    \item Mesure centrée sur le temps total sans métriques système complémentaires (mémoire, shuffle read/write, etc.).
+\end{itemize}
+
+\section{Conclusion}
+Le projet valide une implémentation opérationnelle du CCF avec Spark RDD et met en évidence l'écart possible entre optimisation théorique et gain réel selon le contexte d'exécution. En pratique, l'intérêt du cache dépend fortement de la taille des graphes et de l'architecture d'exécution. Une extension naturelle consiste à répéter l'étude sur un cluster multi-noeuds et à enrichir l'instrumentation de performance.
+
+\appendix
+\section{Annexe -- Référentiel GitHub}
+L'intégralité du code (implémentations, scripts d'expérimentation, documentation et consignes de reproduction) est disponible dans le dépôt GitHub du projet :
+
+\begin{center}
+\url{https://github.com/admhan/connected-components-spark}
+\end{center}
+
+\end{document}
